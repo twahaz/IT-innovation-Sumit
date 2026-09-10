@@ -17,7 +17,8 @@ import {
 } from 'lucide-react';
 import { useActiveEvent } from '../hooks/useActiveEvent';
 
-const API_URL = (import.meta.env && import.meta.env.VITE_API_URL) || 'http://localhost:5000/api/registrations';
+const API_BASE = (import.meta.env && import.meta.env.VITE_API_URL) || 'http://localhost:5000';
+const API_URL = `${API_BASE}/api/registrations`;
 
 const RegistrationForm = () => {
   const { 
