@@ -2,13 +2,24 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  database: process.env.DB_NAME || 'it_innovation_summit',
-  user: process.env.DB_USER || 'postgres',
-  password: String(process.env.DB_PASSWORD || ''),
-});
+const isUsingDatabaseUrl = Boolean(process.env.DATABASE_URL);
+
+const pool = new Pool(
+  isUsingDatabaseUrl
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: {
+          rejectUnauthorized: false,
+        },
+      }
+    : {
+        host: process.env.DB_HOST || 'localhost',
+        port: parseInt(process.env.DB_PORT || '5432', 10),
+        database: process.env.DB_NAME || 'it_innovation_summit',
+        user: process.env.DB_USER || 'postgres',
+        password: String(process.env.DB_PASSWORD || ''),
+      }
+);
 
 /**
  * Initializes database connection and verifies/creates schema and indexes.
@@ -20,8 +31,8 @@ async function initDb() {
     try {
       client = await pool.connect();
     } catch (connErr) {
-      // If the database does not exist (PostgreSQL error code 3D000), attempt to create it
-      if (connErr.code === '3D000') {
+      // If the database does not exist (PostgreSQL error code 3D000), attempt to create it (local only)
+      if (!isUsingDatabaseUrl && connErr.code === '3D000') {
         console.log(`[Database] Database "${dbName}" not found. Attempting to create it...`);
         const rootPool = new Pool({
           host: process.env.DB_HOST || 'localhost',
@@ -247,7 +258,45 @@ async function initDb() {
     console.log(`[Database] Tables and indexes initialized successfully.`);
     return true;
   } catch (err) {
-    console.error(`[Database Error] Could not initialize database: ${err.message}`);
+    const error = err || {};
+    const sanitize = (val) => {
+      if (val === undefined || val === null) {
+        return 'N/A';
+      }
+      let str = typeof val === 'string' ? val : (val.stack || String(val));
+      if (!str || str.trim().length === 0) {
+        return '(empty)';
+      }
+      // Mask credentials in database connection URIs (e.g. postgres://user:password@host)
+      str = str.replace(/([a-zA-Z]+:\/\/[^:\s]+:)([^@\s]+)(@)/g, '$1***$3');
+
+      // Mask known sensitive environment variables
+      const sensitiveValues = [
+        process.env.DATABASE_URL,
+        process.env.DB_PASSWORD,
+        process.env.JWT_SECRET,
+        process.env.ADMIN_PASSWORD,
+        process.env.EMAIL_PASSWORD,
+      ];
+      for (const secret of sensitiveValues) {
+        if (typeof secret === 'string' && secret.trim().length > 0) {
+          str = str.split(secret).join('[REDACTED]');
+          try {
+            const encoded = encodeURIComponent(secret);
+            if (encoded !== secret) {
+              str = str.split(encoded).join('[REDACTED]');
+            }
+          } catch (_) {}
+        }
+      }
+      return str;
+    };
+
+    console.error('[Database Error] Could not initialize database:');
+    console.error(`  error.message: ${sanitize(error.message)}`);
+    console.error(`  error.code: ${sanitize(error.code)}`);
+    console.error(`  error.name: ${sanitize(error.name || error.constructor?.name)}`);
+    console.error(`  error.stack: ${sanitize(error.stack)}`);
     return false;
   }
 }
